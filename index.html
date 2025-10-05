@@ -63,6 +63,7 @@
             border-radius: 8px;
             margin-bottom: 1.5em;
             font-size: 0.95em;
+            line-height: 1.6;
         }
         textarea, #text-display {
             width: 100%;
@@ -81,7 +82,7 @@
             scroll-behavior: smooth;
         }
         #text-display span {
-            cursor: pointer; /* Indicate that words are clickable */
+            cursor: pointer;
             transition: background-color 0.2s;
         }
         #text-display .highlight {
@@ -163,9 +164,10 @@
         <div class="instructions">
             <b>How to use:</b>
             <ol>
-                <li>Enter text by typing, pasting, or uploading a file.</li>
-                <li>Place your cursor where you want to start, then click <b>Read Aloud</b>.</li>
-                <li>While reading, click any word or sentence to hear it spoken individually.</li>
+                <li>Enter your text below.</li>
+                <li>Place the cursor where you want to start and click <b>Read Aloud</b>.</li>
+                <li>Click any word/sentence in the display to hear it individually.</li>
+                <li>When you click <b>Stop Reading</b>, the cursor will return to the last spoken word.</li>
             </ol>
         </div>
         
@@ -210,7 +212,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // DOM Elements
+            // DOM Elements and State Variables (same as before)
             const unsupportedMessage = document.getElementById('unsupported-message');
             const textBox = document.getElementById('textBox');
             const textDisplay = document.getElementById('text-display');
@@ -221,8 +223,6 @@
             const increaseFontBtn = document.getElementById('increaseFont');
             const decreaseFontBtn = document.getElementById('decreaseFont');
             const highlightRadios = document.querySelectorAll('input[name="highlight-mode"]');
-
-            // Speech Synthesis and State
             const synthesis = window.speechSynthesis;
             const SPEECH_MAX_LENGTH = 15000;
             let isReading = false;
@@ -241,7 +241,7 @@
                 return;
             }
 
-            // --- EVENT LISTENERS ---
+            // --- EVENT LISTENERS (same as before) ---
             readBtn.addEventListener('click', () => {
                 if (isReading) {
                     stopReading();
@@ -250,46 +250,34 @@
                 }
             });
 
-            // NEW: Click-to-Read functionality
             textDisplay.addEventListener('click', (event) => {
                 if (event.target.tagName === 'SPAN') {
-                    // Stop any ongoing continuous reading
-                    if (synthesis.speaking) {
-                        synthesis.cancel();
-                    }
-                    
+                    if (synthesis.speaking) synthesis.cancel();
                     const textToSpeak = event.target.textContent;
                     const clickUtterance = new SpeechSynthesisUtterance(textToSpeak);
                     clickUtterance.rate = parseFloat(speedControl.value);
-                    
-                    // Highlight the clicked word temporarily
                     if (lastHighlightedElement) lastHighlightedElement.classList.remove('highlight');
                     event.target.classList.add('highlight');
                     lastHighlightedElement = event.target;
-                    
                     clickUtterance.onend = () => {
-                        // If we are not in a continuous reading session, remove highlight
                         if (!isReading) {
                            event.target.classList.remove('highlight');
                            lastHighlightedElement = null;
                         }
                     };
-                    
                     synthesis.speak(clickUtterance);
                 }
             });
 
-            fileInput.addEventListener('change', (event) => { /* ... unchanged ... */
+            fileInput.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    textBox.value = e.target.result;
-                };
+                reader.onload = (e) => textBox.value = e.target.result;
                 reader.readAsText(file);
             });
 
-            speedControl.addEventListener('input', () => { /* ... unchanged ... */
+            speedControl.addEventListener('input', () => {
                 speedValue.textContent = `${parseFloat(speedControl.value).toFixed(1)}x`;
             });
 
@@ -298,80 +286,88 @@
 
             // --- CORE FUNCTIONS ---
 
-            function changeFontSize(amount) { /* ... unchanged ... */
+            function changeFontSize(amount) {
                 currentFontSize += amount;
                 if (currentFontSize < 1) currentFontSize = 1;
                 textDisplay.style.fontSize = `${currentFontSize}em`;
             }
-
+            
+            // Unchanged `startReading` function
             function startReading() {
                 const fullText = textBox.value.trim();
                 if (fullText.length === 0) return;
-                
-                // NEW: Get cursor position to start reading from there
                 readStartPosition = textBox.selectionStart;
                 const textToRead = fullText.substring(readStartPosition);
-
                 if (synthesis.speaking) synthesis.cancel();
-
-                prepareDisplay(fullText); // Always prepare the full text for display
+                prepareDisplay(fullText);
                 textBox.style.display = 'none';
                 textDisplay.style.display = 'block';
-                
                 const textChunks = chunkText(textToRead, SPEECH_MAX_LENGTH);
                 utteranceQueue = textChunks.map(chunk => {
                     const utterance = new SpeechSynthesisUtterance(chunk);
                     utterance.rate = parseFloat(speedControl.value);
                     return utterance;
                 });
-                
                 playNextUtterance();
                 isReading = true;
                 readBtn.textContent = 'Stop Reading';
                 readBtn.classList.add('stop');
             }
 
+            // Unchanged `playNextUtterance` function
             function playNextUtterance() {
                 if (utteranceQueue.length === 0) {
                     stopReading();
                     return;
                 }
                 const utterance = utteranceQueue.shift();
-                
                 utterance.onboundary = (event) => {
-                    // NEW: Add the start position to get the absolute index
                     const absoluteCharIndex = readStartPosition + event.charIndex;
                     highlightPart(absoluteCharIndex);
                 };
-
                 utterance.onend = () => playNextUtterance();
                 synthesis.speak(utterance);
             }
 
-            function stopReading() { /* ... unchanged ... */
-                synthesis.cancel();
+            // *** UPDATED stopReading FUNCTION ***
+            function stopReading() {
+                synthesis.cancel(); // Immediately stop any speech
                 utteranceQueue = [];
                 isReading = false;
-                readStartPosition = 0; // Reset start position
+
+                // Determine where the cursor should be placed
+                let finalCursorPosition = readStartPosition; // Default to where reading started
+                if (lastHighlightedElement) {
+                    // If a word was highlighted, use its starting position
+                    finalCursorPosition = parseInt(lastHighlightedElement.dataset.startIndex, 10);
+                }
+
+                // Reset UI buttons and display
                 readBtn.textContent = 'Read Aloud';
                 readBtn.classList.remove('stop');
                 textBox.style.display = 'block';
                 textDisplay.style.display = 'none';
+
+                // Set focus and move the cursor to the determined position
+                textBox.focus();
+                textBox.setSelectionRange(finalCursorPosition, finalCursorPosition);
+
+                // Clean up state variables for the next run
                 if (lastHighlightedElement) {
                     lastHighlightedElement.classList.remove('highlight');
                     lastHighlightedElement = null;
                 }
+                readStartPosition = 0; // Reset start position for the next session
             }
             
-            function prepareDisplay(text) { /* ... unchanged ... */
+            // Unchanged helper functions
+            function prepareDisplay(text) {
                 const mode = document.querySelector('input[name="highlight-mode"]:checked').value;
                 const regex = mode === 'sentence' ? /[^.!?]+[.!?]*\s*|[^.!?]+$/g : /(\S+\s*)/g;
                 const parts = text.match(regex) || [];
-                
                 contentParts = [];
                 textDisplay.innerHTML = '';
                 let charIndex = 0;
-
                 parts.forEach(part => {
                     const span = document.createElement('span');
                     span.textContent = part;
@@ -382,11 +378,10 @@
                 });
             }
 
-            function highlightPart(charIndex) { /* ... unchanged ... */
+            function highlightPart(charIndex) {
                 if (lastHighlightedElement) {
                     lastHighlightedElement.classList.remove('highlight');
                 }
-                
                 let currentPart = null;
                 for (let i = contentParts.length - 1; i >= 0; i--) {
                     if (charIndex >= parseInt(contentParts[i].dataset.startIndex, 10)) {
@@ -394,7 +389,6 @@
                         break;
                     }
                 }
-
                 if (currentPart) {
                     currentPart.classList.add('highlight');
                     currentPart.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -402,22 +396,18 @@
                 }
             }
 
-            function chunkText(text, maxLength) { /* ... unchanged ... */
+            function chunkText(text, maxLength) {
                 const chunks = [];
                 let i = 0;
                 while (i < text.length) {
                     let endIndex = i + maxLength;
                     if (endIndex < text.length) {
                         let lastPunctuation = Math.max(
-                            text.lastIndexOf('.', endIndex),
-                            text.lastIndexOf('?', endIndex),
-                            text.lastIndexOf('!', endIndex),
-                            text.lastIndexOf('\n', endIndex),
+                            text.lastIndexOf('.', endIndex), text.lastIndexOf('?', endIndex),
+                            text.lastIndexOf('!', endIndex), text.lastIndexOf('\n', endIndex),
                             text.lastIndexOf(' ', endIndex)
                         );
-                        if (lastPunctuation > i) {
-                            endIndex = lastPuncctuation;
-                        }
+                        if (lastPunctuation > i) endIndex = lastPunctuation;
                     }
                     chunks.push(text.substring(i, endIndex + 1));
                     i = endIndex + 1;
