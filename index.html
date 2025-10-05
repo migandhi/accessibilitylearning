@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accessible Reading Tool</title>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --danger-color: #dc3545;
+            --danger-hover: #c82333;
+            --light-gray: #f8f9fa;
+            --border-color: #ced4da;
+            --text-color: #212529;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--light-gray);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1em;
+            box-sizing: border-box;
+        }
+        .container {
+            width: 95%;
+            max-width: 900px;
+            background: #fff;
+            padding: 2.5em;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #343a40;
+            margin-bottom: 1em;
+        }
+        textarea {
+            width: 100%;
+            height: 300px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1em;
+            font-size: 1.2em; /* Larger default font */
+            line-height: 1.7;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        #text-display {
+            width: 100%;
+            height: 300px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1em;
+            font-size: 1.5em; /* Larger initial font size for reading */
+            line-height: 1.7;
+            box-sizing: border-box;
+            overflow-y: auto;
+            scroll-behavior: smooth; /* Enables smooth scrolling */
+        }
+        #text-display .highlight {
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 4px;
+            padding: 0 0.2em;
+        }
+        .controls {
+            margin-top: 1.5em;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5em;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8em;
+        }
+        .control-group label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .control-group > div {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+        }
+        button, label[for="fileInput"] {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            text-align: center;
+        }
+        button:hover, label[for="fileInput"]:hover {
+            background-color: var(--primary-hover);
+        }
+        button#readBtn.stop {
+             background-color: var(--danger-color);
+        }
+        button#readBtn.stop:hover {
+            background-color: var(--danger-hover);
+        }
+        #fileInput {
+            display: none;
+        }
+        input[type="range"] {
+            flex-grow: 1;
+        }
+        .font-size-btn {
+            width: 40px;
+            height: 40px;
+            font-size: 1.5em;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Accessible Reading Tool</h1>
+        <p>Upload a text file or paste text below. Adjust the speed and font size for a comfortable reading experience.</p>
+        
+        <textarea id="textBox" placeholder="Start by typing, pasting, or uploading text here..."></textarea>
+        <div id="text-display" style="display:none;"></div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="speedControl">Reading Speed: <span id="speedValue">1x</span></label>
+                <input type="range" id="speedControl" min="0.5" max="2" value="1" step="0.1">
+            </div>
+            
+            <div class="control-group">
+                <label>Font Size</label>
+                <div>
+                    <button id="decreaseFont" class="font-size-btn">-</button>
+                    <button id="increaseFont" class="font-size-btn">+</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Highlight Mode</label>
+                <div>
+                    <input type="radio" id="highlight-word" name="highlight-mode" value="word" checked>
+                    <label for="highlight-word">Word</label>
+                    <input type="radio" id="highlight-sentence" name="highlight-mode" value="sentence">
+                    <label for="highlight-sentence">Sentence</label>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>Actions</label>
+                <div>
+                    <label for="fileInput">Upload File</label>
+                    <input type="file" id="fileInput" accept=".txt">
+                    <button id="readBtn">Read Aloud</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const textBox = document.getElementById('textBox');
+            const textDisplay = document.getElementById('text-display');
+            const readBtn = document.getElementById('readBtn');
+            const fileInput = document.getElementById('fileInput');
+            const speedControl = document.getElementById('speedControl');
+            const speedValue = document.getElementById('speedValue');
+            const increaseFontBtn = document.getElementById('increaseFont');
+            const decreaseFontBtn = document.getElementById('decreaseFont');
+
+            // Speech Synthesis and State
+            const synthesis = window.speechSynthesis;
+            const SPEECH_MAX_LENGTH = 15000; // Safe character limit for utterances
+            let isReading = false;
+            let utteranceQueue = [];
+            let currentFontSize = 1.5; // in 'em' units
+            let contentParts = []; // Stores words/sentences for highlighting
+            let lastHighlightedElement = null;
+
+            // Check for browser support
+            if (!synthesis) {
+                readBtn.disabled = true;
+                alert("Sorry, your browser does not support the Web Speech API, which is needed for reading aloud.");
+            }
+
+            // Event Listeners
+            readBtn.addEventListener('click', () => {
+                if (isReading) {
+                    stopReading();
+                } else {
+                    startReading();
+                }
+            });
+
+            fileInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    textBox.value = e.target.result;
+                };
+                reader.readAsText(file);
+            });
+
+            speedControl.addEventListener('input', () => {
+                speedValue.textContent = `${parseFloat(speedControl.value).toFixed(1)}x`;
+            });
+
+            increaseFontBtn.addEventListener('click', () => changeFontSize(0.2));
+            decreaseFontBtn.addEventListener('click', () => changeFontSize(-0.2));
+
+            function changeFontSize(amount) {
+                currentFontSize += amount;
+                if (currentFontSize < 1) currentFontSize = 1; // Set a minimum size
+                textDisplay.style.fontSize = `${currentFontSize}em`;
+            }
+
+            function startReading() {
+                const text = textBox.value.trim();
+                if (text.length === 0) return;
+
+                // Stop any previous reading
+                if (synthesis.speaking) synthesis.cancel();
+
+                prepareDisplay(text);
+                textBox.style.display = 'none';
+                textDisplay.style.display = 'block';
+
+                // Chunk the text to handle long inputs
+                const textChunks = chunkText(text, SPEECH_MAX_LENGTH);
+                utteranceQueue = textChunks.map(chunk => {
+                    const utterance = new SpeechSynthesisUtterance(chunk);
+                    utterance.rate = parseFloat(speedControl.value);
+                    return utterance;
+                });
+                
+                playNextUtterance();
+                isReading = true;
+                readBtn.textContent = 'Stop Reading';
+                readBtn.classList.add('stop');
+            }
+
+            function playNextUtterance() {
+                if (utteranceQueue.length === 0) {
+                    stopReading();
+                    return;
+                }
+
+                const utterance = utteranceQueue.shift();
+                
+                utterance.onboundary = (event) => {
+                    // Find the absolute character index
+                    const textUpToNow = event.utterance.text.substring(0, event.charIndex);
+                    const absoluteCharIndex = (textDisplay.textContent.indexOf(event.utterance.text) || 0) + event.charIndex;
+                    highlightPart(absoluteCharIndex);
+                };
+
+                utterance.onend = () => {
+                    // When one chunk finishes, play the next
+                    playNextUtterance();
+                };
+                
+                synthesis.speak(utterance);
+            }
+
+            function stopReading() {
+                synthesis.cancel(); // Clears the synth queue
+                utteranceQueue = [];
+                isReading = false;
+                readBtn.textContent = 'Read Aloud';
+                readBtn.classList.remove('stop');
+                textBox.style.display = 'block';
+                textDisplay.style.display = 'none';
+                if (lastHighlightedElement) {
+                    lastHighlightedElement.classList.remove('highlight');
+                    lastHighlightedElement = null;
+                }
+            }
+            
+            function prepareDisplay(text) {
+                const mode = document.querySelector('input[name="highlight-mode"]:checked').value;
+                const regex = mode === 'sentence' ? /[^.!?]+[.!?]*\s*|[^.!?]+$/g : /(\S+\s*)/g;
+                const parts = text.match(regex) || [];
+                
+                contentParts = [];
+                textDisplay.innerHTML = '';
+                let charIndex = 0;
+
+                parts.forEach((part, index) => {
+                    const span = document.createElement('span');
+                    span.textContent = part;
+                    span.dataset.startIndex = charIndex;
+                    textDisplay.appendChild(span);
+                    contentParts.push(span);
+                    charIndex += part.length;
+                });
+            }
+
+            function highlightPart(charIndex) {
+                if (lastHighlightedElement) {
+                    lastHighlightedElement.classList.remove('highlight');
+                }
+                
+                // Find the span that corresponds to the current character index
+                let currentPart = null;
+                for (let i = contentParts.length - 1; i >= 0; i--) {
+                    if (charIndex >= parseInt(contentParts[i].dataset.startIndex, 10)) {
+                        currentPart = contentParts[i];
+                        break;
+                    }
+                }
+
+                if (currentPart) {
+                    currentPart.classList.add('highlight');
+                    // Scroll the highlighted element into the center of the view
+                    currentPart.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    lastHighlightedElement = currentPart;
+                }
+            }
+
+            function chunkText(text, maxLength) {
+                const chunks = [];
+                let i = 0;
+                while (i < text.length) {
+                    let endIndex = i + maxLength;
+                    if (endIndex < text.length) {
+                        // Find the last punctuation or space to avoid cutting words
+                        let lastPunctuation = Math.max(
+                            text.lastIndexOf('.', endIndex),
+                            text.lastIndexOf('?', endIndex),
+                            text.lastIndexOf('!', endIndex),
+                            text.lastIndexOf('\n', endIndex),
+                            text.lastIndexOf(' ', endIndex)
+                        );
+                        if (lastPunctuation > i) {
+                            endIndex = lastPunctuation;
+                        }
+                    }
+                    chunks.push(text.substring(i, endIndex + 1));
+                    i = endIndex + 1;
+                }
+                return chunks;
+            }
+        });
+    </script>
+</body>
+</html>
