@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Crucial for mobile-friendly design -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Accessible Reading Tool</title>
     <style>
@@ -13,54 +14,66 @@
             --light-gray: #f8f9fa;
             --border-color: #ced4da;
             --text-color: #212529;
+            --warning-bg: #fff3cd;
+            --warning-text: #856404;
+            --warning-border: #ffeeba;
+        }
+        /* Universal box-sizing for easier layout */
+        *, *::before, *::after {
+            box-sizing: border-box;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--light-gray);
             color: var(--text-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
             margin: 0;
-            padding: 1em;
-            box-sizing: border-box;
+            padding: 1em; /* Padding on body for edge spacing on mobile */
         }
         .container {
-            width: 95%;
+            width: 100%;
             max-width: 900px;
+            margin: 0 auto; /* Center the container */
             background: #fff;
-            padding: 2.5em;
+            padding: 1.5em;
             border-radius: 15px;
             box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        @media (min-width: 600px) {
+            .container {
+                padding: 2.5em;
+            }
         }
         h1 {
             text-align: center;
             color: #343a40;
+            margin-top: 0;
             margin-bottom: 1em;
         }
-        textarea {
+        #unsupported-message {
+            display: none; /* Hidden by default */
+            padding: 1em;
+            background-color: var(--warning-bg);
+            color: var(--warning-text);
+            border: 1px solid var(--warning-border);
+            border-radius: 8px;
+            margin-bottom: 1.5em;
+            text-align: center;
+        }
+        textarea, #text-display {
             width: 100%;
-            height: 300px;
+            height: 40vh; /* Use viewport height for adaptive sizing */
+            min-height: 200px;
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 1em;
-            font-size: 1.2em; /* Larger default font */
+            font-size: 1.2em;
             line-height: 1.7;
-            box-sizing: border-box;
             resize: vertical;
         }
         #text-display {
-            width: 100%;
-            height: 300px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1em;
-            font-size: 1.5em; /* Larger initial font size for reading */
-            line-height: 1.7;
-            box-sizing: border-box;
+            font-size: 1.5em;
             overflow-y: auto;
-            scroll-behavior: smooth; /* Enables smooth scrolling */
+            scroll-behavior: smooth;
         }
         #text-display .highlight {
             background-color: var(--primary-color);
@@ -71,7 +84,8 @@
         .controls {
             margin-top: 1.5em;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            /* Responsive grid: auto-fit columns with a minimum width */
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 1.5em;
             align-items: center;
         }
@@ -88,12 +102,13 @@
             display: flex;
             align-items: center;
             gap: 1em;
+            flex-wrap: wrap; /* Allow wrapping within control groups */
         }
         button, label[for="fileInput"] {
             background-color: var(--primary-color);
             color: white;
             border: none;
-            padding: 12px 20px;
+            padding: 14px 22px; /* Slightly larger padding for touch */
             border-radius: 8px;
             font-size: 1em;
             font-weight: 500;
@@ -103,6 +118,10 @@
         }
         button:hover, label[for="fileInput"]:hover {
             background-color: var(--primary-hover);
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
         }
         button#readBtn.stop {
              background-color: var(--danger-color);
@@ -117,8 +136,8 @@
             flex-grow: 1;
         }
         .font-size-btn {
-            width: 40px;
-            height: 40px;
+            width: 44px; /* Larger touch target */
+            height: 44px;
             font-size: 1.5em;
             line-height: 1;
         }
@@ -128,6 +147,11 @@
 
     <div class="container">
         <h1>Accessible Reading Tool</h1>
+        
+        <div id="unsupported-message">
+            <strong>Browser Not Supported:</strong> The read-aloud feature requires the Web Speech API, which is not available in your current browser. Please try using a recent version of Chrome, Edge, or Safari.
+        </div>
+
         <p>Upload a text file or paste text below. Adjust the speed and font size for a comfortable reading experience.</p>
         
         <textarea id="textBox" placeholder="Start by typing, pasting, or uploading text here..."></textarea>
@@ -171,6 +195,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // DOM Elements
+            const unsupportedMessage = document.getElementById('unsupported-message');
             const textBox = document.getElementById('textBox');
             const textDisplay = document.getElementById('text-display');
             const readBtn = document.getElementById('readBtn');
@@ -179,21 +204,28 @@
             const speedValue = document.getElementById('speedValue');
             const increaseFontBtn = document.getElementById('increaseFont');
             const decreaseFontBtn = document.getElementById('decreaseFont');
+            const highlightRadios = document.querySelectorAll('input[name="highlight-mode"]');
 
             // Speech Synthesis and State
             const synthesis = window.speechSynthesis;
-            const SPEECH_MAX_LENGTH = 15000; // Safe character limit for utterances
+            const SPEECH_MAX_LENGTH = 15000;
             let isReading = false;
             let utteranceQueue = [];
-            let currentFontSize = 1.5; // in 'em' units
-            let contentParts = []; // Stores words/sentences for highlighting
+            let currentFontSize = 1.5;
+            let contentParts = [];
             let lastHighlightedElement = null;
 
             // Check for browser support
             if (!synthesis) {
+                unsupportedMessage.style.display = 'block';
+                // Disable all controls related to speech
                 readBtn.disabled = true;
-                alert("Sorry, your browser does not support the Web Speech API, which is needed for reading aloud.");
+                speedControl.disabled = true;
+                highlightRadios.forEach(radio => radio.disabled = true);
+                return; // Stop the script if not supported
             }
+
+            // --- The rest of the script is the same as the previous version ---
 
             // Event Listeners
             readBtn.addEventListener('click', () => {
@@ -223,7 +255,7 @@
 
             function changeFontSize(amount) {
                 currentFontSize += amount;
-                if (currentFontSize < 1) currentFontSize = 1; // Set a minimum size
+                if (currentFontSize < 1) currentFontSize = 1;
                 textDisplay.style.fontSize = `${currentFontSize}em`;
             }
 
@@ -231,14 +263,12 @@
                 const text = textBox.value.trim();
                 if (text.length === 0) return;
 
-                // Stop any previous reading
                 if (synthesis.speaking) synthesis.cancel();
 
                 prepareDisplay(text);
                 textBox.style.display = 'none';
                 textDisplay.style.display = 'block';
-
-                // Chunk the text to handle long inputs
+                
                 const textChunks = chunkText(text, SPEECH_MAX_LENGTH);
                 utteranceQueue = textChunks.map(chunk => {
                     const utterance = new SpeechSynthesisUtterance(chunk);
@@ -257,26 +287,20 @@
                     stopReading();
                     return;
                 }
-
                 const utterance = utteranceQueue.shift();
                 
                 utterance.onboundary = (event) => {
-                    // Find the absolute character index
-                    const textUpToNow = event.utterance.text.substring(0, event.charIndex);
                     const absoluteCharIndex = (textDisplay.textContent.indexOf(event.utterance.text) || 0) + event.charIndex;
                     highlightPart(absoluteCharIndex);
                 };
 
-                utterance.onend = () => {
-                    // When one chunk finishes, play the next
-                    playNextUtterance();
-                };
+                utterance.onend = () => playNextUtterance();
                 
                 synthesis.speak(utterance);
             }
 
             function stopReading() {
-                synthesis.cancel(); // Clears the synth queue
+                synthesis.cancel();
                 utteranceQueue = [];
                 isReading = false;
                 readBtn.textContent = 'Read Aloud';
@@ -298,7 +322,7 @@
                 textDisplay.innerHTML = '';
                 let charIndex = 0;
 
-                parts.forEach((part, index) => {
+                parts.forEach(part => {
                     const span = document.createElement('span');
                     span.textContent = part;
                     span.dataset.startIndex = charIndex;
@@ -313,7 +337,6 @@
                     lastHighlightedElement.classList.remove('highlight');
                 }
                 
-                // Find the span that corresponds to the current character index
                 let currentPart = null;
                 for (let i = contentParts.length - 1; i >= 0; i--) {
                     if (charIndex >= parseInt(contentParts[i].dataset.startIndex, 10)) {
@@ -324,7 +347,6 @@
 
                 if (currentPart) {
                     currentPart.classList.add('highlight');
-                    // Scroll the highlighted element into the center of the view
                     currentPart.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     lastHighlightedElement = currentPart;
                 }
@@ -336,7 +358,6 @@
                 while (i < text.length) {
                     let endIndex = i + maxLength;
                     if (endIndex < text.length) {
-                        // Find the last punctuation or space to avoid cutting words
                         let lastPunctuation = Math.max(
                             text.lastIndexOf('.', endIndex),
                             text.lastIndexOf('?', endIndex),
