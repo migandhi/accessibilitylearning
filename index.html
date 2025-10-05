@@ -15,7 +15,6 @@
             --text-color: #212529;
             --warning-bg: #fff3cd;
             --warning-text: #856404;
-            --warning-border: #ffeeba;
         }
         *, *::before, *::after {
             box-sizing: border-box;
@@ -36,7 +35,7 @@
             border-radius: 15px;
             box-shadow: 0 8px 25px rgba(0,0,0,0.1);
         }
-        @media (min-width: 600px) {
+        @media (min-width: 768px) {
             .container {
                 padding: 2.5em;
             }
@@ -52,7 +51,6 @@
             padding: 1em;
             background-color: var(--warning-bg);
             color: var(--warning-text);
-            border: 1px solid var(--warning-border);
             border-radius: 8px;
             margin-bottom: 1.5em;
             text-align: center;
@@ -68,7 +66,7 @@
         textarea, #text-display {
             width: 100%;
             height: 40vh;
-            min-height: 200px;
+            min-height: 250px;
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 1em;
@@ -94,7 +92,7 @@
         .controls {
             margin-top: 1.5em;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 1.5em;
             align-items: center;
         }
@@ -158,16 +156,15 @@
         <h1>Interactive Reading Tool</h1>
         
         <div id="unsupported-message">
-            <strong>Browser Not Supported:</strong> The read-aloud feature requires the Web Speech API, which is not available in your current browser. Please try using a recent version of Chrome, Edge, or Safari.
+            <strong>Browser Not Supported:</strong> The read-aloud feature is not available in your browser. Please try a recent version of Chrome, Edge, or Safari.
         </div>
 
         <div class="instructions">
             <b>How to use:</b>
             <ol>
-                <li>Enter your text below.</li>
-                <li>Place the cursor where you want to start and click <b>Read Aloud</b>.</li>
-                <li>Click any word/sentence in the display to hear it individually.</li>
-                <li>When you click <b>Stop Reading</b>, the cursor will return to the last spoken word.</li>
+                <li>Enter text below by typing, pasting, or uploading a file.</li>
+                <li>Place the cursor where you want to start, then click <b>Read Aloud</b>.</li>
+                <li>When you <b>Stop Reading</b>, the cursor will return to your last position.</li>
             </ol>
         </div>
         
@@ -175,12 +172,10 @@
         <div id="text-display" style="display:none;"></div>
 
         <div class="controls">
-            <!-- Controls are the same as before -->
             <div class="control-group">
                 <label for="speedControl">Reading Speed: <span id="speedValue">1x</span></label>
                 <input type="range" id="speedControl" min="0.5" max="2" value="1" step="0.1">
             </div>
-            
             <div class="control-group">
                 <label>Font Size</label>
                 <div>
@@ -188,7 +183,6 @@
                     <button id="increaseFont" class="font-size-btn">+</button>
                 </div>
             </div>
-
             <div class="control-group">
                 <label>Highlight Mode</label>
                 <div>
@@ -198,7 +192,6 @@
                     <label for="highlight-sentence">Sentence</label>
                 </div>
             </div>
-            
             <div class="control-group">
                 <label>Actions</label>
                 <div>
@@ -212,17 +205,18 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // DOM Elements and State Variables (same as before)
-            const unsupportedMessage = document.getElementById('unsupported-message');
+            // DOM Elements
             const textBox = document.getElementById('textBox');
             const textDisplay = document.getElementById('text-display');
             const readBtn = document.getElementById('readBtn');
+            const unsupportedMessage = document.getElementById('unsupported-message');
             const fileInput = document.getElementById('fileInput');
             const speedControl = document.getElementById('speedControl');
             const speedValue = document.getElementById('speedValue');
             const increaseFontBtn = document.getElementById('increaseFont');
             const decreaseFontBtn = document.getElementById('decreaseFont');
-            const highlightRadios = document.querySelectorAll('input[name="highlight-mode"]');
+            
+            // State
             const synthesis = window.speechSynthesis;
             const SPEECH_MAX_LENGTH = 15000;
             let isReading = false;
@@ -231,23 +225,19 @@
             let contentParts = [];
             let lastHighlightedElement = null;
             let readStartPosition = 0;
+            let cumulativeCharsSpoken = 0; // **BUG FIX**: Track chars across chunks
 
             // Browser support check
             if (!synthesis) {
                 unsupportedMessage.style.display = 'block';
                 readBtn.disabled = true;
                 speedControl.disabled = true;
-                highlightRadios.forEach(radio => radio.disabled = true);
                 return;
             }
 
-            // --- EVENT LISTENERS (same as before) ---
+            // Event Listeners
             readBtn.addEventListener('click', () => {
-                if (isReading) {
-                    stopReading();
-                } else {
-                    startReading();
-                }
+                isReading ? stopReading() : startReading();
             });
 
             textDisplay.addEventListener('click', (event) => {
@@ -268,7 +258,7 @@
                     synthesis.speak(clickUtterance);
                 }
             });
-
+            
             fileInput.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -284,87 +274,85 @@
             increaseFontBtn.addEventListener('click', () => changeFontSize(0.2));
             decreaseFontBtn.addEventListener('click', () => changeFontSize(-0.2));
 
-            // --- CORE FUNCTIONS ---
-
             function changeFontSize(amount) {
-                currentFontSize += amount;
-                if (currentFontSize < 1) currentFontSize = 1;
+                currentFontSize = Math.max(1, currentFontSize + amount);
                 textDisplay.style.fontSize = `${currentFontSize}em`;
             }
-            
-            // Unchanged `startReading` function
+
             function startReading() {
                 const fullText = textBox.value.trim();
                 if (fullText.length === 0) return;
+
                 readStartPosition = textBox.selectionStart;
                 const textToRead = fullText.substring(readStartPosition);
+
                 if (synthesis.speaking) synthesis.cancel();
+
                 prepareDisplay(fullText);
                 textBox.style.display = 'none';
                 textDisplay.style.display = 'block';
+                
                 const textChunks = chunkText(textToRead, SPEECH_MAX_LENGTH);
                 utteranceQueue = textChunks.map(chunk => {
                     const utterance = new SpeechSynthesisUtterance(chunk);
                     utterance.rate = parseFloat(speedControl.value);
                     return utterance;
                 });
+                
+                cumulativeCharsSpoken = 0; // Reset for new session
                 playNextUtterance();
                 isReading = true;
                 readBtn.textContent = 'Stop Reading';
                 readBtn.classList.add('stop');
             }
 
-            // Unchanged `playNextUtterance` function
             function playNextUtterance() {
                 if (utteranceQueue.length === 0) {
                     stopReading();
                     return;
                 }
                 const utterance = utteranceQueue.shift();
+                
                 utterance.onboundary = (event) => {
-                    const absoluteCharIndex = readStartPosition + event.charIndex;
+                    const absoluteCharIndex = readStartPosition + cumulativeCharsSpoken + event.charIndex;
                     highlightPart(absoluteCharIndex);
                 };
-                utterance.onend = () => playNextUtterance();
+
+                utterance.onend = () => {
+                    cumulativeCharsSpoken += utterance.text.length; // **BUG FIX**: Update count after a chunk finishes
+                    playNextUtterance();
+                };
+
                 synthesis.speak(utterance);
             }
 
-            // *** UPDATED stopReading FUNCTION ***
             function stopReading() {
-                synthesis.cancel(); // Immediately stop any speech
+                synthesis.cancel();
                 utteranceQueue = [];
                 isReading = false;
 
-                // Determine where the cursor should be placed
-                let finalCursorPosition = readStartPosition; // Default to where reading started
+                let finalCursorPosition = readStartPosition;
                 if (lastHighlightedElement) {
-                    // If a word was highlighted, use its starting position
                     finalCursorPosition = parseInt(lastHighlightedElement.dataset.startIndex, 10);
                 }
 
-                // Reset UI buttons and display
                 readBtn.textContent = 'Read Aloud';
                 readBtn.classList.remove('stop');
                 textBox.style.display = 'block';
                 textDisplay.style.display = 'none';
 
-                // Set focus and move the cursor to the determined position
                 textBox.focus();
                 textBox.setSelectionRange(finalCursorPosition, finalCursorPosition);
-
-                // Clean up state variables for the next run
-                if (lastHighlightedElement) {
-                    lastHighlightedElement.classList.remove('highlight');
-                    lastHighlightedElement = null;
-                }
-                readStartPosition = 0; // Reset start position for the next session
+                
+                lastHighlightedElement = null;
+                cumulativeCharsSpoken = 0;
             }
             
-            // Unchanged helper functions
             function prepareDisplay(text) {
                 const mode = document.querySelector('input[name="highlight-mode"]:checked').value;
                 const regex = mode === 'sentence' ? /[^.!?]+[.!?]*\s*|[^.!?]+$/g : /(\S+\s*)/g;
                 const parts = text.match(regex) || [];
+                
                 contentParts = [];
                 textDisplay.innerHTML = '';
                 let charIndex = 0;
@@ -379,9 +367,8 @@
             }
 
             function highlightPart(charIndex) {
-                if (lastHighlightedElement) {
-                    lastHighlightedElement.classList.remove('highlight');
-                }
+                if (lastHighlightedElement) lastHighlightedElement.classList.remove('highlight');
+                
                 let currentPart = null;
                 for (let i = contentParts.length - 1; i >= 0; i--) {
                     if (charIndex >= parseInt(contentParts[i].dataset.startIndex, 10)) {
@@ -389,6 +376,7 @@
                         break;
                     }
                 }
+
                 if (currentPart) {
                     currentPart.classList.add('highlight');
                     currentPart.scrollIntoView({ behavior: 'smooth', block: 'center' });
