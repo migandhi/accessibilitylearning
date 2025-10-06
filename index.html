@@ -63,6 +63,12 @@
             font-size: 0.95em;
             line-height: 1.6;
         }
+        .note {
+            font-size: 0.9em;
+            text-align: center;
+            margin-bottom: 1.5em;
+            color: #6c757d;
+        }
         textarea, #text-display {
             width: 100%;
             height: 40vh;
@@ -105,11 +111,19 @@
             font-weight: 600;
             color: #495057;
         }
-        .control-group > div {
+        .control-group > div, .control-group > select {
             display: flex;
             align-items: center;
             gap: 1em;
             flex-wrap: wrap;
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background-color: #fff;
+            font-size: 1em;
         }
         button, label[for="fileInput"] {
             background-color: var(--primary-color);
@@ -167,12 +181,19 @@
                 <li>When you <b>Stop Reading</b>, the cursor will return to your last position.</li>
             </ol>
         </div>
+        <p class="note">
+            <b>Note:</b> Text highlighting depends on the selected voice. If highlighting doesn't work, please try a different voice.
+        </p>
         
         <textarea id="textBox" placeholder="Start by typing, pasting, or uploading text here..."></textarea>
         <div id="text-display" style="display:none;"></div>
 
         <div class="controls">
             <div class="control-group">
+                <label for="voiceSelect">Voice</label>
+                <select id="voiceSelect"></select>
+            </div>
+             <div class="control-group">
                 <label for="speedControl">Reading Speed: <span id="speedValue">1x</span></label>
                 <input type="range" id="speedControl" min="0.5" max="2" value="1" step="0.1">
             </div>
@@ -215,6 +236,7 @@
             const speedValue = document.getElementById('speedValue');
             const increaseFontBtn = document.getElementById('increaseFont');
             const decreaseFontBtn = document.getElementById('decreaseFont');
+            const voiceSelect = document.getElementById('voiceSelect');
             
             // State
             const synthesis = window.speechSynthesis;
@@ -225,7 +247,7 @@
             let contentParts = [];
             let lastHighlightedElement = null;
             let readStartPosition = 0;
-            let cumulativeCharsSpoken = 0; // **BUG FIX**: Track chars across chunks
+            let cumulativeCharsSpoken = 0;
 
             // Browser support check
             if (!synthesis) {
@@ -235,7 +257,31 @@
                 return;
             }
 
-            // Event Listeners
+            // --- Voice Selection ---
+            function populateVoiceList() {
+                const voices = synthesis.getVoices();
+                voiceSelect.innerHTML = '';
+                if (voices.length === 0) {
+                    const option = document.createElement('option');
+                    option.textContent = 'No voices available';
+                    voiceSelect.appendChild(option);
+                    return;
+                }
+                voices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.textContent = `${voice.name} (${voice.lang})`;
+                    option.setAttribute('data-lang', voice.lang);
+                    option.setAttribute('data-name', voice.name);
+                    voiceSelect.appendChild(option);
+                });
+            }
+
+            populateVoiceList();
+            if (synthesis.onvoiceschanged !== undefined) {
+                synthesis.onvoiceschanged = populateVoiceList;
+            }
+
+            // --- Event Listeners ---
             readBtn.addEventListener('click', () => {
                 isReading ? stopReading() : startReading();
             });
@@ -244,8 +290,7 @@
                 if (event.target.tagName === 'SPAN') {
                     if (synthesis.speaking) synthesis.cancel();
                     const textToSpeak = event.target.textContent;
-                    const clickUtterance = new SpeechSynthesisUtterance(textToSpeak);
-                    clickUtterance.rate = parseFloat(speedControl.value);
+                    const clickUtterance = createUtterance(textToSpeak);
                     if (lastHighlightedElement) lastHighlightedElement.classList.remove('highlight');
                     event.target.classList.add('highlight');
                     lastHighlightedElement = event.target;
@@ -274,6 +319,21 @@
             increaseFontBtn.addEventListener('click', () => changeFontSize(0.2));
             decreaseFontBtn.addEventListener('click', () => changeFontSize(-0.2));
 
+            // --- Core Functions ---
+            function createUtterance(text) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = parseFloat(speedControl.value);
+                const selectedVoiceName = voiceSelect.selectedOptions[0]?.getAttribute('data-name');
+                if (selectedVoiceName) {
+                    const voices = synthesis.getVoices();
+                    const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
+                    if (selectedVoice) {
+                        utterance.voice = selectedVoice;
+                    }
+                }
+                return utterance;
+            }
+            
             function changeFontSize(amount) {
                 currentFontSize = Math.max(1, currentFontSize + amount);
                 textDisplay.style.fontSize = `${currentFontSize}em`;
@@ -293,13 +353,9 @@
                 textDisplay.style.display = 'block';
                 
                 const textChunks = chunkText(textToRead, SPEECH_MAX_LENGTH);
-                utteranceQueue = textChunks.map(chunk => {
-                    const utterance = new SpeechSynthesisUtterance(chunk);
-                    utterance.rate = parseFloat(speedControl.value);
-                    return utterance;
-                });
+                utteranceQueue = textChunks.map(chunk => createUtterance(chunk));
                 
-                cumulativeCharsSpoken = 0; // Reset for new session
+                cumulativeCharsSpoken = 0; 
                 playNextUtterance();
                 isReading = true;
                 readBtn.textContent = 'Stop Reading';
@@ -314,12 +370,14 @@
                 const utterance = utteranceQueue.shift();
                 
                 utterance.onboundary = (event) => {
-                    const absoluteCharIndex = readStartPosition + cumulativeCharsSpoken + event.charIndex;
-                    highlightPart(absoluteCharIndex);
+                    if (event.name === 'word') {
+                        const absoluteCharIndex = readStartPosition + cumulativeCharsSpoken + event.charIndex;
+                        highlightPart(absoluteCharIndex);
+                    }
                 };
 
                 utterance.onend = () => {
-                    cumulativeCharsSpoken += utterance.text.length; // **BUG FIX**: Update count after a chunk finishes
+                    cumulativeCharsSpoken += utterance.text.length;
                     playNextUtterance();
                 };
 
@@ -333,7 +391,9 @@
 
                 let finalCursorPosition = readStartPosition;
                 if (lastHighlightedElement) {
-                    finalCursorPosition = parseInt(lastHighlightedElement.dataset.startIndex, 10);
+                    const lastIndex = parseInt(lastHighlightedElement.dataset.startIndex, 10);
+                    const lastLength = lastHighlightedElement.textContent.length;
+                    finalCursorPosition = lastIndex + lastLength;
                 }
 
                 readBtn.textContent = 'Read Aloud';
@@ -370,8 +430,10 @@
                 if (lastHighlightedElement) lastHighlightedElement.classList.remove('highlight');
                 
                 let currentPart = null;
+                // Find the last span that starts at or before the current character index
                 for (let i = contentParts.length - 1; i >= 0; i--) {
-                    if (charIndex >= parseInt(contentParts[i].dataset.startIndex, 10)) {
+                    const partStartIndex = parseInt(contentParts[i].dataset.startIndex, 10);
+                    if (charIndex >= partStartIndex) {
                         currentPart = contentParts[i];
                         break;
                     }
@@ -379,7 +441,7 @@
 
                 if (currentPart) {
                     currentPart.classList.add('highlight');
-                    currentPart.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    currentPart.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
                     lastHighlightedElement = currentPart;
                 }
             }
@@ -395,7 +457,9 @@
                             text.lastIndexOf('!', endIndex), text.lastIndexOf('\n', endIndex),
                             text.lastIndexOf(' ', endIndex)
                         );
-                        if (lastPunctuation > i) endIndex = lastPunctuation;
+                        if (lastPunctuation > i) {
+                           endIndex = lastPunctuation;
+                        }
                     }
                     chunks.push(text.substring(i, endIndex + 1));
                     i = endIndex + 1;
@@ -405,4 +469,5 @@
         });
     </script>
 </body>
+
 </html>
